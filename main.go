@@ -1,14 +1,12 @@
 package main
 
 import (
-	"fmt"
-	"net"
-	"io"
-	"time"
-	"log"
 	"flag"
-	"os"
-	"bufio"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"github.com/olomix/dynproxy/proxy_cache"
 )
 
 var proxyList = make(chan string, 10)
@@ -19,47 +17,26 @@ func init() {
 	flag.Parse()
 }
 
-type Proxy struct {
-	Addr string
-	lastCheck time.Time
-	failCounter int
-}
-
-// Read proxies from input file. One address:port per line.
-func readProxiesFromFile() []Proxy{
-	var file *os.File
-	var err error
-	file, err = os.Open(proxyFileName)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-	var reader *bufio.Scanner = bufio.NewScanner(file)
-	var result []Proxy = make([]Proxy, 0)
-	for reader.Scan() {
-		result = append(result, Proxy{Addr: reader.Text()})
-	}
-	return result
-}
-
-func proxyEmitter() {
-	var proxies []Proxy = readProxiesFromFile()
-	for {
-		for i := range proxies {
-			proxyList <- proxies[i].Addr
-		}
-	}
-}
+//func proxyEmitter() {
+//	var proxies []Proxy = readProxiesFromFile()
+//	for {
+//		for i := range proxies {
+//			proxyList <- proxies[i].Addr
+//		}
+//	}
+//}
 
 func nextProxy() string {
 	return <-proxyList
 }
 
 func main() {
-	go proxyEmitter()
+	flag.Parse()
+//	go proxyEmitter()
 	var addr *net.TCPAddr
 	var err error
-	var unresolved_addr string = "0.0.0.0:3128";
+	var unresolved_addr string = "0.0.0.0:3128"
+	proxy_cache.NewProxyCache(proxyFileName)
 	addr, err = net.ResolveTCPAddr("tcp", unresolved_addr)
 	if err != nil {
 		panic(fmt.Sprintf("can't resolve addr %v: %v", unresolved_addr, err))
@@ -71,8 +48,8 @@ func main() {
 	}
 
 	for {
-		var conn *net.TCPConn;
-		conn, err = server.AcceptTCP();
+		var conn *net.TCPConn
+		conn, err = server.AcceptTCP()
 		if err != nil {
 			panic(err)
 		}
