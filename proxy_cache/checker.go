@@ -53,7 +53,16 @@ func (cc *CacheContext) Stop() {
 
 func worker(pc *CacheContext) {
 	for {
+		pc.lock.RLock()
+		l := pc.proxies.Len()
+		pc.lock.RUnlock()
+		if l == 0 {
+			continue
+		}
+
+		pc.lock.Lock()
 		proxy := heap.Pop(&pc.proxies).(Proxy)
+		pc.lock.Unlock()
 
 		// If nearest proxy checking in some time, wait for this time
 		waitFor := recheckIn(&proxy)
@@ -78,6 +87,7 @@ func (pc *CacheContext) checkProxy(proxy Proxy) {
 	atomic.AddInt64(pc.checkPoolSize, 1)
 	defer func() {
 		atomic.AddInt64(pc.checkPoolSize, -1)
+
 		pc.lock.Lock()
 		heap.Push(&pc.proxies, proxy)
 		pc.lock.Unlock()
