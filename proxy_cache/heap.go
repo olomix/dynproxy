@@ -3,17 +3,13 @@ package proxy_cache
 import (
 	"hash/fnv"
 	"time"
-	"log"
 )
 
 type ProxyHeap []Proxy
 
 func (h ProxyHeap) Len() int           { return len(h) }
 func (h ProxyHeap) Less(i, j int) bool { return isLess(&h[i], &h[j]) }
-func (h ProxyHeap) Swap(i, j int)      {
-	log.Printf("Swap %v & %v", i, j)
-	h[i], h[j] = h[j], h[i]
-}
+func (h ProxyHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
 func (h *ProxyHeap) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's

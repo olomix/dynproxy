@@ -3,13 +3,15 @@ package proxy_cache
 import (
 	"bufio"
 	"container/heap"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
-	"net/http"
-	"io/ioutil"
 )
 
 const proxyCheckPool = 1000
@@ -43,7 +45,7 @@ func NewProxyCache(proxyFileName string) ProxyCache {
 	return cache
 }
 
-func (cc *CacheContext) NextProxy() string{
+func (cc *CacheContext) NextProxy() string {
 	panic("not implemented error")
 }
 
@@ -76,6 +78,7 @@ func worker(pc *CacheContext) {
 		for checkPoolSize >= proxyCheckPool {
 			log.Print("Checking pool is full. Wait for one second.")
 			time.Sleep(time.Second)
+			checkPoolSize = atomic.LoadInt64(pc.checkPoolSize)
 		}
 
 		// Start checking gorotine
@@ -94,22 +97,29 @@ func (pc *CacheContext) checkProxy(proxy Proxy) {
 	}()
 
 	client := &http.Client{
-		Transport: &http.Transport{},
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) {
+				return url.Parse(fmt.Sprintf("http://%s", proxy.Addr))
+			},
+		},
 	}
 	resp, err := client.Get("http://lomaka.org.ua/t.txt")
-	if err != nil {
-		log.Printf("Error: %v", err)
-	}
-	out, err := ioutil.ReadAll(resp.Body)
 	proxy.lastCheck = time.Now().UTC()
-	if err != nil || string(out) != "6b5f2815-5c7a-4970-99f1-8eb290564ddc" {
-		log.Printf("Proxy %v check failed", proxy.Addr)
-		proxy.failCounter++
-	} else {
-		log.Printf("Proxy %v check OK", proxy.Addr)
-		proxy.failCounter = 0
+	if err == nil {
+		defer resp.Body.Close()
+		out, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error: %v", err)
+		}
+		if err == nil && string(out) == "6b5f2815-5c7a-4970-99f1-8eb290564ddc\n" {
+			log.Printf("Proxy %v check OK", proxy.Addr)
+			proxy.failCounter = 0
+			return
+		}
+
 	}
-	defer resp.Body.Close()
+	log.Printf("Proxy %v check failed", proxy.Addr)
+	proxy.failCounter++
 }
 
 // Read proxies from input file. One address:port per line.
