@@ -41,7 +41,6 @@ func isLess(left, right *Proxy) bool {
 
 // Return duration in which we need to recheck proxy
 func recheckIn(proxy *Proxy) time.Duration {
-	log.Printf("check in for %v", proxy)
 	now := time.Now().UTC()
 	checkInMax := proxy.lastCheck.Add(proxyCheckTimeoutMax)
 
@@ -51,8 +50,7 @@ func recheckIn(proxy *Proxy) time.Duration {
 		failCounter = 30
 	}
 
-	checkIn := now.Add(proxyCheckTimeoutMin * (1 << failCounter))
-	log.Printf("checkIn: %v, checkInMax: %v, now: %v", checkIn, checkInMax, now)
+	checkIn := proxy.lastCheck.Add(proxyCheckTimeoutMin * (1 << failCounter))
 	switch {
 	case checkIn.Before(now):
 		return time.Duration(0)
