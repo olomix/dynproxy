@@ -26,7 +26,7 @@ type Proxy struct {
 
 type ProxyCache interface {
 	Stop()
-	NextProxy() string
+	NextProxy() (string, error)
 }
 
 type CacheContext struct {
@@ -47,8 +47,8 @@ func NewProxyCache(proxyFileName string) ProxyCache {
 	return cache
 }
 
-func (cc *CacheContext) NextProxy() string {
-	panic("not implemented error")
+func (cc *CacheContext) NextProxy() (string, error) {
+	return cc.goodProxyList.next()
 }
 
 func (cc *CacheContext) Stop() {
@@ -98,6 +98,7 @@ func (pc *CacheContext) checkProxy(proxy Proxy) {
 		pc.lock.Unlock()
 	}()
 
+	var oldFailCounter uint = proxy.failCounter
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy: func(req *http.Request) (*url.URL, error) {
@@ -116,12 +117,18 @@ func (pc *CacheContext) checkProxy(proxy Proxy) {
 		if err == nil && string(out) == "6b5f2815-5c7a-4970-99f1-8eb290564ddc\n" {
 			log.Printf("Proxy %v check OK", proxy.Addr)
 			proxy.failCounter = 0
+			if oldFailCounter != 0 {
+				pc.goodProxyList.append(proxy.Addr)
+			}
 			return
 		}
 
 	}
 	log.Printf("Proxy %v check failed", proxy.Addr)
 	proxy.failCounter++
+	if oldFailCounter == 0 {
+		pc.goodProxyList.remove(proxy.Addr)
+	}
 }
 
 // Read proxies from input file. One address:port per line.

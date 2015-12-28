@@ -17,26 +17,12 @@ func init() {
 	flag.Parse()
 }
 
-//func proxyEmitter() {
-//	var proxies []Proxy = readProxiesFromFile()
-//	for {
-//		for i := range proxies {
-//			proxyList <- proxies[i].Addr
-//		}
-//	}
-//}
-
-func nextProxy() string {
-	return <-proxyList
-}
-
 func main() {
 	flag.Parse()
-//	go proxyEmitter()
 	var addr *net.TCPAddr
 	var err error
 	var unresolved_addr string = "0.0.0.0:3128"
-	proxy_cache.NewProxyCache(proxyFileName)
+	var pCache proxy_cache.ProxyCache = proxy_cache.NewProxyCache(proxyFileName)
 	addr, err = net.ResolveTCPAddr("tcp", unresolved_addr)
 	if err != nil {
 		panic(fmt.Sprintf("can't resolve addr %v: %v", unresolved_addr, err))
@@ -53,16 +39,20 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, pCache)
 	}
 
 }
 
-func handleConnection(conn *net.TCPConn) {
+func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 	fmt.Print(conn)
 	var proxyAddr *net.TCPAddr
 	var err error
-	var proxy string = nextProxy()
+	var proxy string
+	proxy, err = pCache.NextProxy()
+	if err != nil {
+		panic(err)
+	}
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
 		panic(fmt.Sprintf("can't resolve addr %v: %v", proxy, err))
