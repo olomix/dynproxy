@@ -98,37 +98,64 @@ func (pc *CacheContext) checkProxy(proxy Proxy) {
 		pc.lock.Unlock()
 	}()
 
-	var oldFailCounter uint = proxy.failCounter
+	pc.lock.RLock()
+	var proxyAddr string = proxy.Addr
+	pc.lock.RUnlock()
+
+	// long operation, put locking after it
+	var checkResult bool = checkWithProxy(proxyAddr)
+
+	pc.lock.Lock()
+	if checkResult {
+		log.Printf("Proxy %v check OK", proxy.Addr)
+		if proxy.failCounter != 0 {
+			pc.goodProxyList.append(proxy.Addr)
+			proxy.failCounter = 0
+		}
+	} else {
+		log.Printf("Proxy %v check failed", proxy.Addr)
+		if proxy.failCounter == 0 {
+			pc.goodProxyList.remove(proxy.Addr)
+		}
+		proxy.failCounter++
+	}
+	proxy.lastCheck = time.Now().UTC()
+	pc.lock.Unlock()
+}
+
+func checkWithProxy(addr string) (result bool) {
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy: func(req *http.Request) (*url.URL, error) {
-				return url.Parse(fmt.Sprintf("http://%s", proxy.Addr))
+				return url.Parse(fmt.Sprintf("http://%s", addr))
 			},
 		},
 	}
-	resp, err := client.Get("http://lomaka.org.ua/t.txt")
-	proxy.lastCheck = time.Now().UTC()
-	if err == nil {
-		defer resp.Body.Close()
-		out, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			log.Printf("Error: %v", err)
-		}
-		if err == nil && string(out) == "6b5f2815-5c7a-4970-99f1-8eb290564ddc\n" {
-			log.Printf("Proxy %v check OK", proxy.Addr)
-			proxy.failCounter = 0
-			if oldFailCounter != 0 {
-				pc.goodProxyList.append(proxy.Addr)
-			}
-			return
-		}
+	var req *http.Request
+	var resp *http.Response
+	var err error
 
+	req, err = http.NewRequest("GET", "http://lomaka.org.ua/t.txt", nil)
+	if err != nil {
+		log.Printf("Can't create request: %v", err)
+		return false
 	}
-	log.Printf("Proxy %v check failed", proxy.Addr)
-	proxy.failCounter++
-	if oldFailCounter == 0 {
-		pc.goodProxyList.remove(proxy.Addr)
+
+	req.Header.Add("Cache-Control", "no-cache")
+	resp, err = client.Do(req)
+	if err != nil {
+		log.Printf("Can't connect to %v: %v", addr, err)
+		return false
 	}
+
+	defer resp.Body.Close()
+
+	out, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Can't read from proxy %v: %v", addr, err)
+		return false
+	}
+	return string(out) == "6b5f2815-5c7a-4970-99f1-8eb290564ddc\n"
 }
 
 // Read proxies from input file. One address:port per line.
