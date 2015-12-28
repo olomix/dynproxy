@@ -33,12 +33,14 @@ type CacheContext struct {
 	lock          sync.RWMutex
 	proxies       ProxyHeap
 	checkPoolSize *int64
+	goodProxyList GoodProxyList
 }
 
 func NewProxyCache(proxyFileName string) ProxyCache {
 	cache := &CacheContext{
 		proxies:       readProxiesFromFile(proxyFileName),
 		checkPoolSize: new(int64),
+		goodProxyList: NewGoodProxyList(),
 	}
 	heap.Init(&cache.proxies)
 	go worker(cache)
