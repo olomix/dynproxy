@@ -44,21 +44,29 @@ func main() {
 }
 
 func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
-	fmt.Print(conn)
 	var proxyAddr *net.TCPAddr
 	var err error
 	var proxy string
 	proxy, err = pCache.NextProxy()
 	if err != nil {
-		panic(err)
+		log.Printf("Can't get next proxy: %v", err)
+		conn.Close()
+		return
 	}
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
-		panic(fmt.Sprintf("can't resolve addr %v: %v", proxy, err))
+		log.Printf("can't resolve addr %v: %v", proxy, err)
+		conn.Close()
+		return
 	}
 	var proxyConn *net.TCPConn
 	log.Printf("Handle connection with %v", proxy)
 	proxyConn, err = net.DialTCP("tcp", nil, proxyAddr)
+	if err != nil {
+		log.Printf("can't deal to proxy: %v", err)
+		conn.Close()
+		return
+	}
 	go copyClientToProxy(conn, proxyConn)
 	go copyProxyToClient(conn, proxyConn)
 }

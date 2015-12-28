@@ -142,6 +142,7 @@ func checkWithProxy(addr string) (result bool) {
 	}
 
 	req.Header.Add("Cache-Control", "no-cache")
+	req.Header.Add("Proxy-Connection", "Keep-Alive")
 	resp, err = client.Do(req)
 	if err != nil {
 		log.Printf("Can't connect to %v: %v", addr, err)
