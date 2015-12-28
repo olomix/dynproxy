@@ -9,7 +9,6 @@ import (
 	"github.com/olomix/dynproxy/proxy_cache"
 )
 
-var proxyList = make(chan string, 10)
 var proxyFileName string
 
 func init() {
