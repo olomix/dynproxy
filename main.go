@@ -7,6 +7,8 @@ import (
 	"net"
 	"github.com/olomix/dynproxy/proxy_cache"
 	"github.com/golang/glog"
+	"bufio"
+	"net/http"
 )
 
 var proxyFileName string
@@ -82,13 +84,20 @@ func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 }
 
 func copyClientToProxy(clientConn, proxyConn *net.TCPConn, ch chan bool) {
-	var l int64
+	var bufReader *bufio.Reader = bufio.NewReader(clientConn)
+	var req *http.Request
 	var err error
-	l, err = io.Copy(proxyConn, clientConn)
+	if req, err = http.ReadRequest(bufReader); err != nil {
+		glog.Errorf("Error on reading request: %v", err)
+		ch <- false
+		return
+	}
+	glog.V(1).Infof("Got request to %v", req.URL)
+
+	err = req.Write(proxyConn)
 	if err != nil {
 		glog.Errorf("Error on copying from client to proxy: %v", err)
 	}
-	glog.Infof("Copied %d bytes from client to proxy", l)
 	ch <- false
 }
 
