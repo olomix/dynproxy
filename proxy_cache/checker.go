@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"container/heap"
 	"fmt"
+	"github.com/golang/glog"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -71,14 +71,14 @@ func worker(pc *CacheContext) {
 		// If nearest proxy checking in some time, wait for this time
 		waitFor := recheckIn(&proxy)
 		if waitFor > 0 {
-			log.Printf("There is %v to check. Sleep for now.", waitFor)
+			glog.V(2).Infof("There is %v to check. Sleep for now.", waitFor)
 			time.Sleep(waitFor)
 		}
 
 		// If worker pool is full, wait for some time
 		var checkPoolSize int64 = atomic.LoadInt64(pc.checkPoolSize)
 		for checkPoolSize >= proxyCheckPool {
-			log.Print("Checking pool is full. Wait for one second.")
+			glog.V(2).Infof("Checking pool is full. Wait for one second.")
 			time.Sleep(time.Second)
 			checkPoolSize = atomic.LoadInt64(pc.checkPoolSize)
 		}
@@ -107,13 +107,13 @@ func (pc *CacheContext) checkProxy(proxy Proxy) {
 
 	pc.lock.Lock()
 	if checkResult {
-		log.Printf("Proxy %v check OK", proxy.Addr)
+		glog.V(2).Infof("Proxy %v check OK", proxy.Addr)
 		if proxy.failCounter != 0 {
 			pc.goodProxyList.append(proxy.Addr)
 			proxy.failCounter = 0
 		}
 	} else {
-		log.Printf("Proxy %v check failed", proxy.Addr)
+		glog.V(2).Infof("Proxy %v check failed", proxy.Addr)
 		if proxy.failCounter == 0 {
 			pc.goodProxyList.remove(proxy.Addr)
 		}
@@ -137,7 +137,7 @@ func checkWithProxy(addr string) (result bool) {
 
 	req, err = http.NewRequest("GET", "http://lomaka.org.ua/t.txt", nil)
 	if err != nil {
-		log.Printf("Can't create request: %v", err)
+		glog.Errorf("Can't create request: %v", err)
 		return false
 	}
 
@@ -145,7 +145,9 @@ func checkWithProxy(addr string) (result bool) {
 	req.Header.Add("Proxy-Connection", "Keep-Alive")
 	resp, err = client.Do(req)
 	if err != nil {
-		log.Printf("Can't connect to %v: %v", addr, err)
+		if glog.V(2) {
+			glog.Errorf("Can't connect to %v: %v", addr, err)
+		}
 		return false
 	}
 
@@ -153,7 +155,9 @@ func checkWithProxy(addr string) (result bool) {
 
 	out, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Can't read from proxy %v: %v", addr, err)
+		if glog.V(2) {
+			glog.Errorf("Can't read from proxy %v: %v", addr, err)
+		}
 		return false
 	}
 	return string(out) == "6b5f2815-5c7a-4970-99f1-8eb290564ddc\n"

@@ -4,9 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"github.com/olomix/dynproxy/proxy_cache"
+	"github.com/golang/glog"
 )
 
 var proxyFileName string
@@ -49,44 +49,59 @@ func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 	var proxy string
 	proxy, err = pCache.NextProxy()
 	if err != nil {
-		log.Printf("Can't get next proxy: %v", err)
+		glog.Errorf("Can't get next proxy: %v", err)
 		conn.Close()
 		return
 	}
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
-		log.Printf("can't resolve addr %v: %v", proxy, err)
+		glog.Errorf("can't resolve addr %v: %v", proxy, err)
 		conn.Close()
 		return
 	}
 	var proxyConn *net.TCPConn
-	log.Printf("Handle connection with %v", proxy)
+	glog.Infof("Handle connection with %v", proxy)
 	proxyConn, err = net.DialTCP("tcp", nil, proxyAddr)
 	if err != nil {
-		log.Printf("can't deal to proxy: %v", err)
+		glog.Errorf("can't deal to proxy: %v", err)
 		conn.Close()
 		return
 	}
-	go copyClientToProxy(conn, proxyConn)
-	go copyProxyToClient(conn, proxyConn)
+	var clientCh chan bool = make(chan bool)
+	var proxyCh chan bool = make(chan bool)
+	go copyClientToProxy(conn, proxyConn, clientCh)
+	go copyProxyToClient(conn, proxyConn, proxyCh)
+	for i := 0; i < 2; i++ {
+		select {
+		case <- clientCh:
+			glog.Info("Client connection done")
+		case <- proxyCh:
+			glog.Info("Proxy connection done")
+		}
+	}
 }
 
-func copyClientToProxy(clientConn, proxyConn *net.TCPConn) {
+func copyClientToProxy(clientConn, proxyConn *net.TCPConn, ch chan bool) {
 	var l int64
 	var err error
 	l, err = io.Copy(proxyConn, clientConn)
 	if err != nil {
-		log.Printf("Error on copying from client to proxy: %v", err)
+		glog.Errorf("Error on copying from client to proxy: %v", err)
 	}
-	log.Printf("Copied %d bytes from client to proxy", l)
+	glog.Infof("Copied %d bytes from client to proxy", l)
+	ch <- false
 }
 
-func copyProxyToClient(clientConn, proxyConn *net.TCPConn) {
+func copyProxyToClient(clientConn, proxyConn *net.TCPConn, ch chan bool) {
 	var l int64
 	var err error
 	l, err = io.Copy(clientConn, proxyConn)
 	if err != nil {
-		log.Printf("Error on copying from proxy to cient: %v", err)
+		glog.Errorf("Error on copying from proxy to cient: %v", err)
 	}
-	log.Printf("Copied %d bytes from proxy to client", l)
+	glog.Infof("Copied %d bytes from proxy to client", l)
+	if err = clientConn.Close(); err != nil {
+		glog.Errorf("Can't close client connection: %v", err)
+	}
+	ch <- false
 }
