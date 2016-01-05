@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const proxyCheckPool = 1000
+const proxyCheckPool = 100
 const proxyCheckTimeoutMin = 5 * time.Minute
 const proxyCheckTimeoutMax = 24 * time.Hour
 

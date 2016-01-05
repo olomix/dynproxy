@@ -1,13 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"github.com/golang/glog"
+	"github.com/olomix/dynproxy/proxy_cache"
 	"io"
 	"net"
-	"github.com/olomix/dynproxy/proxy_cache"
-	"github.com/golang/glog"
-	"bufio"
 	"net/http"
 )
 
@@ -75,9 +75,9 @@ func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 	go copyProxyToClient(conn, proxyConn, proxyCh)
 	for i := 0; i < 2; i++ {
 		select {
-		case <- clientCh:
+		case <-clientCh:
 			glog.Info("Client connection done")
-		case <- proxyCh:
+		case <-proxyCh:
 			glog.Info("Proxy connection done")
 		}
 	}
@@ -97,7 +97,18 @@ func copyClientToProxy(clientConn, proxyConn *net.TCPConn, ch chan bool) {
 	err = req.Write(proxyConn)
 	if err != nil {
 		glog.Errorf("Error on copying from client to proxy: %v", err)
+		ch <- false
+		return
 	}
+
+	var l int64
+	l, err = io.Copy(proxyConn, clientConn)
+	if err != nil {
+		glog.Errorf("Error on extra copying from client to proxy: %v", err)
+		ch <- false
+		return
+	}
+	glog.Infof("Copied %d bytes from client to proxy", l)
 	ch <- false
 }
 
