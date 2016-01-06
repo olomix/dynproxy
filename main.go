@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"github.com/golang/glog"
+	"github.com/olomix/dynproxy/log"
 	"github.com/olomix/dynproxy/proxy_cache"
 	"io"
 	"net"
@@ -20,6 +20,7 @@ func init() {
 
 func main() {
 	flag.Parse()
+	log.SetupLogs()
 	var addr *net.TCPAddr
 	var err error
 	var unresolved_addr string = "0.0.0.0:3128"
@@ -51,21 +52,21 @@ func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 	var proxy string
 	proxy, err = pCache.NextProxy()
 	if err != nil {
-		glog.Errorf("Can't get next proxy: %v", err)
+		log.Errorf("Can't get next proxy: %v", err)
 		conn.Close()
 		return
 	}
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
-		glog.Errorf("can't resolve addr %v: %v", proxy, err)
+		log.Errorf("can't resolve addr %v: %v", proxy, err)
 		conn.Close()
 		return
 	}
 	var proxyConn *net.TCPConn
-	glog.Infof("Handle connection with %v", proxy)
+	log.Printf("Handle connection with %v", proxy)
 	proxyConn, err = net.DialTCP("tcp", nil, proxyAddr)
 	if err != nil {
-		glog.Errorf("can't deal to proxy: %v", err)
+		log.Errorf("can't deal to proxy: %v", err)
 		conn.Close()
 		return
 	}
@@ -76,9 +77,9 @@ func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 	for i := 0; i < 2; i++ {
 		select {
 		case <-clientCh:
-			glog.Info("Client connection done")
+			log.Print("Client connection done")
 		case <-proxyCh:
-			glog.Info("Proxy connection done")
+			log.Print("Proxy connection done")
 		}
 	}
 }
@@ -88,15 +89,15 @@ func copyClientToProxy(clientConn, proxyConn *net.TCPConn, ch chan bool) {
 	var req *http.Request
 	var err error
 	if req, err = http.ReadRequest(bufReader); err != nil {
-		glog.Errorf("Error on reading request: %v", err)
+		log.Errorf("Error on reading request: %v", err)
 		ch <- false
 		return
 	}
-	glog.V(1).Infof("Got request to %v", req.URL)
+	log.Debugf("Got request to %v", req.URL)
 
 	err = req.Write(proxyConn)
 	if err != nil {
-		glog.Errorf("Error on copying from client to proxy: %v", err)
+		log.Errorf("Error on copying from client to proxy: %v", err)
 		ch <- false
 		return
 	}
@@ -104,11 +105,11 @@ func copyClientToProxy(clientConn, proxyConn *net.TCPConn, ch chan bool) {
 	var l int64
 	l, err = io.Copy(proxyConn, clientConn)
 	if err != nil {
-		glog.Errorf("Error on extra copying from client to proxy: %v", err)
+		log.Errorf("Error on extra copying from client to proxy: %v", err)
 		ch <- false
 		return
 	}
-	glog.Infof("Copied %d bytes from client to proxy", l)
+	log.Printf("Copied %d bytes from client to proxy", l)
 	ch <- false
 }
 
@@ -117,11 +118,11 @@ func copyProxyToClient(clientConn, proxyConn *net.TCPConn, ch chan bool) {
 	var err error
 	l, err = io.Copy(clientConn, proxyConn)
 	if err != nil {
-		glog.Errorf("Error on copying from proxy to cient: %v", err)
+		log.Errorf("Error on copying from proxy to cient: %v", err)
 	}
-	glog.Infof("Copied %d bytes from proxy to client", l)
+	log.Printf("Copied %d bytes from proxy to client", l)
 	if err = clientConn.Close(); err != nil {
-		glog.Errorf("Can't close client connection: %v", err)
+		log.Errorf("Can't close client connection: %v", err)
 	}
 	ch <- false
 }
