@@ -12,6 +12,8 @@ import (
 	"os"
 )
 
+const PROXY_HEADER = "X-Dynproxy-Proxy"
+
 var proxyFileName string
 var listenAddress string
 
@@ -51,20 +53,35 @@ func main() {
 
 }
 
-func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
-	var proxyAddr *net.TCPAddr
+func handleConnection(clientConn *net.TCPConn, pCache proxy_cache.ProxyCache) {
+	var bufReader *bufio.Reader = bufio.NewReader(clientConn)
+	var req *http.Request
 	var err error
-	var proxy string
-	proxy, err = pCache.NextProxy()
-	if err != nil {
-		log.Errorf("Can't get next proxy: %v", err)
-		conn.Close()
+	if req, err = http.ReadRequest(bufReader); err != nil {
+		log.Errorf("Error on reading request: %v", err)
 		return
 	}
+	log.Debugf("Got request to %v", req.URL)
+
+	var proxy string
+	var proxies []string
+	var ok bool
+	if proxies, ok = req.Header[PROXY_HEADER]; ok && len(proxies) > 0 {
+		proxy = proxies[0]
+		req.Header.Del(PROXY_HEADER)
+	} else {
+		proxy, err = pCache.NextProxy()
+		if err != nil {
+			log.Errorf("Can't get next proxy: %v", err)
+			clientConn.Close()
+			return
+		}
+	}
+	var proxyAddr *net.TCPAddr
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
 		log.Errorf("can't resolve addr %v: %v", proxy, err)
-		conn.Close()
+		clientConn.Close()
 		return
 	}
 	var proxyConn *net.TCPConn
@@ -72,62 +89,40 @@ func handleConnection(conn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 	proxyConn, err = net.DialTCP("tcp", nil, proxyAddr)
 	if err != nil {
 		log.Errorf("can't deal to proxy: %v", err)
-		conn.Close()
+		clientConn.Close()
 		return
 	}
-	var clientCh chan bool = make(chan bool)
-	var proxyCh chan bool = make(chan bool)
-	go copyClientToProxy(conn, proxyConn, clientCh)
-	go copyProxyToClient(conn, proxyConn, proxyCh)
-	for i := 0; i < 2; i++ {
-		select {
-		case <-clientCh:
-			log.Print("Client connection done")
-		case <-proxyCh:
-			log.Print("Proxy connection done")
-		}
-	}
-}
-
-func copyClientToProxy(clientConn, proxyConn *net.TCPConn, ch chan bool) {
-	var bufReader *bufio.Reader = bufio.NewReader(clientConn)
-	var req *http.Request
-	var err error
-	if req, err = http.ReadRequest(bufReader); err != nil {
-		log.Errorf("Error on reading request: %v", err)
-		ch <- false
-		return
-	}
-	log.Debugf("Got request to %v", req.URL)
 
 	err = req.Write(proxyConn)
 	if err != nil {
 		log.Errorf("Error on copying from client to proxy: %v", err)
-		ch <- false
 		return
 	}
+
+	go copyProxyToClient(clientConn, proxyConn, req, proxy)
 
 	var l int64
 	l, err = io.Copy(proxyConn, clientConn)
 	if err != nil {
 		log.Errorf("Error on extra copying from client to proxy: %v", err)
-		ch <- false
 		return
 	}
 	log.Printf("Copied %d bytes from client to proxy", l)
-	ch <- false
 }
 
-func copyProxyToClient(clientConn, proxyConn *net.TCPConn, ch chan bool) {
-	var l int64
+func copyProxyToClient(
+	clientConn, proxyConn *net.TCPConn, req *http.Request, proxy string,
+) {
 	var err error
-	l, err = io.Copy(clientConn, proxyConn)
+	var bufReader *bufio.Reader = bufio.NewReader(proxyConn)
+	var resp *http.Response
+	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
-		log.Errorf("Error on copying from proxy to cient: %v", err)
+		log.Errorf("Can't read response from proxy: %v", err)
+		proxyConn.Close()
+		clientConn.Close()
+		return
 	}
-	log.Printf("Copied %d bytes from proxy to client", l)
-	if err = clientConn.Close(); err != nil {
-		log.Errorf("Can't close client connection: %v", err)
-	}
-	ch <- false
+	resp.Header.Add(PROXY_HEADER, proxy)
+	resp.Write(clientConn)
 }
