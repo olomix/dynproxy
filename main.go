@@ -9,12 +9,17 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 )
 
 var proxyFileName string
+var listenAddress string
 
 func init() {
 	flag.StringVar(&proxyFileName, "in", "-", "file to read proxies from")
+	flag.StringVar(
+		&listenAddress,
+		"listen", "0.0.0.0:3128", "address to listen on")
 	flag.Parse()
 }
 
@@ -23,16 +28,16 @@ func main() {
 	log.SetupLogs()
 	var addr *net.TCPAddr
 	var err error
-	var unresolved_addr string = "0.0.0.0:3128"
 	var pCache proxy_cache.ProxyCache = proxy_cache.NewProxyCache(proxyFileName)
-	addr, err = net.ResolveTCPAddr("tcp", unresolved_addr)
+	addr, err = net.ResolveTCPAddr("tcp", listenAddress)
 	if err != nil {
-		panic(fmt.Sprintf("can't resolve addr %v: %v", unresolved_addr, err))
+		panic(fmt.Sprintf("can't resolve addr %v: %v", listenAddress, err))
 	}
 	var server *net.TCPListener
 	server, err = net.ListenTCP("tcp", addr)
 	if err != nil {
-		panic(err)
+		log.Error(err)
+		os.Exit(1)
 	}
 
 	for {
