@@ -3,12 +3,14 @@ package proxy_cache
 import (
 	"bufio"
 	"container/heap"
+	"encoding/gob"
 	"fmt"
 	"github.com/olomix/dynproxy/log"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,12 +19,8 @@ import (
 const proxyCheckPool = 100
 const proxyCheckTimeoutMin = 5 * time.Minute
 const proxyCheckTimeoutMax = 24 * time.Hour
-
-type Proxy struct {
-	Addr        string
-	lastCheck   time.Time
-	failCounter uint
-}
+const autoSaveTimeout = 10 * time.Second
+const autoSaveFilename = ".dynproxy.save"
 
 type ProxyCache interface {
 	Stop()
@@ -34,6 +32,7 @@ type CacheContext struct {
 	proxies       ProxyHeap
 	checkPoolSize *int64
 	goodProxyList GoodProxyList
+	saveLock      sync.Mutex
 }
 
 func NewProxyCache(proxyFileName string) ProxyCache {
@@ -43,6 +42,14 @@ func NewProxyCache(proxyFileName string) ProxyCache {
 		goodProxyList: NewGoodProxyList(),
 	}
 	heap.Init(&cache.proxies)
+	for i := range cache.proxies {
+		if cache.proxies[i].failCounter == 0 {
+			cache.goodProxyList.append(cache.proxies[i].Addr)
+		}
+	}
+	log.Debugf(
+		"%d proxies in good state",
+		len(cache.goodProxyList.proxies))
 	go worker(cache)
 	return cache
 }
@@ -56,7 +63,10 @@ func (cc *CacheContext) Stop() {
 }
 
 func worker(pc *CacheContext) {
+	var lastSaved time.Time
+
 	for {
+		lastSaved = saveProxyList(lastSaved, pc)
 		pc.lock.RLock()
 		l := pc.proxies.Len()
 		pc.lock.RUnlock()
@@ -71,8 +81,17 @@ func worker(pc *CacheContext) {
 		// If nearest proxy checking in some time, wait for this time
 		waitFor := recheckIn(&proxy)
 		if waitFor > 0 {
-			log.Debug("There is %v to check. Sleep for now.", waitFor)
-			time.Sleep(waitFor)
+			pc.lock.Lock()
+			heap.Push(&pc.proxies, proxy)
+			pc.lock.Unlock()
+
+			timeToSleep := autoSaveTimeout
+			log.Debugf(
+				"There is %v to check. Sleep for %v now.",
+				waitFor, timeToSleep)
+			time.Sleep(timeToSleep)
+
+			continue
 		}
 
 		// If worker pool is full, wait for some time
@@ -86,6 +105,45 @@ func worker(pc *CacheContext) {
 		// Start checking gorotine
 		go pc.checkProxy(proxy)
 	}
+}
+
+func saveProxyList(lastSaved time.Time, pc *CacheContext) time.Time {
+	if time.Now().Add(-autoSaveTimeout).Before(lastSaved) {
+		return lastSaved
+	}
+
+	pc.lock.RLock()
+	pc.saveLock.Lock()
+
+	defer func() {
+		pc.lock.RUnlock()
+		pc.saveLock.Unlock()
+	}()
+
+	var backup string = fmt.Sprintf("%s.old", autoSaveFilename)
+	//	var isBackedUp bool
+	var err error
+	if _, err = os.Stat(autoSaveFilename); err == nil {
+		//		isBackedUp = true
+		os.Rename(autoSaveFilename, backup)
+	}
+
+	var f *os.File
+	f, err = os.Create(autoSaveFilename)
+	if err != nil {
+		log.Errorf("Can't create file to dump proxies: ", err)
+	}
+	defer f.Close()
+
+	encoder := gob.NewEncoder(f)
+	err = encoder.Encode(pc.proxies)
+	if err != nil {
+		log.Errorf("Can't dump proxies cache: %v", err)
+	} else {
+		log.Debug("Proxies cache dump")
+	}
+
+	return time.Now()
 }
 
 func (pc *CacheContext) checkProxy(proxy Proxy) {
@@ -168,16 +226,78 @@ func readProxiesFromFile(proxyFileName string) []Proxy {
 		panic(err)
 	}
 	defer file.Close()
+
+	proxyList := LoadCache()
+
 	var reader *bufio.Scanner = bufio.NewScanner(file)
 	var result []Proxy = make([]Proxy, 0)
+
+	newProxies := 0
+	cachedProxies := 0
+
 	for reader.Scan() {
-		result = append(
-			result,
-			Proxy{
-				Addr:        reader.Text(),
-				failCounter: 1, // by default proxy is BAD
-			},
-		)
+
+		addr := reader.Text()
+
+		i := -1
+		if proxyList != nil {
+			i = sort.Search(
+				len(proxyList),
+				func(i int) bool { return proxyList[i].Addr >= addr })
+			if i == len(proxyList) || proxyList[i].Addr != addr {
+				i = -1
+			}
+		}
+
+		if i == -1 {
+			result = append(
+				result,
+				Proxy{
+					Addr:        reader.Text(),
+					failCounter: 1, // by default proxy is BAD
+				},
+			)
+			newProxies++
+		} else {
+			result = append(result, proxyList[i])
+			cachedProxies++
+		}
+
 	}
+
+	log.Debugf(
+		"New proxies %d, cached proxies %d, total %d",
+		newProxies, cachedProxies, len(result))
+
 	return result
+}
+
+// Return sorted []Proxy. Use to quck search.
+func LoadCache() ProxyList {
+	_, err := os.Stat(autoSaveFilename)
+	if os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		// TODO implement error handling
+		panic(err)
+	}
+
+	f, err := os.Open(autoSaveFilename)
+	if err != nil {
+		// TODO implement error handling
+		panic(err)
+	}
+
+	proxyHeap := make(ProxyHeap, 0)
+
+	decoder := gob.NewDecoder(f)
+	err = decoder.Decode(&proxyHeap)
+	if err != nil {
+		// TODO implement error handling
+		panic(err)
+	}
+
+	proxyList := ProxyList(proxyHeap)
+	sort.Sort(proxyList)
+	return proxyList
 }
