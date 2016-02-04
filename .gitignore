@@ -3,3 +3,5 @@ dynproxy
 dynproxy.iml
 proxies.txt
 proxy-all.txt
+.dynproxy.save
+.dynproxy.save.old
