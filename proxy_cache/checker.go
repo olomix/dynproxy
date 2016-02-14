@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/olomix/dynproxy/log"
+	"github.com/olomix/dynproxy/stats"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -33,13 +34,15 @@ type CacheContext struct {
 	checkPoolSize *int64
 	goodProxyList GoodProxyList
 	saveLock      sync.Mutex
+	grs           *stats.GoRoutineStats
 }
 
-func NewProxyCache(proxyFileName string) ProxyCache {
+func NewProxyCache(proxyFileName string, grs *stats.GoRoutineStats) ProxyCache {
 	cache := &CacheContext{
 		proxies:       readProxiesFromFile(proxyFileName),
 		checkPoolSize: new(int64),
 		goodProxyList: NewGoodProxyList(),
+		grs:           grs,
 	}
 	heap.Init(&cache.proxies)
 	for i := range cache.proxies {
@@ -147,6 +150,9 @@ func saveProxyList(lastSaved time.Time, pc *CacheContext) time.Time {
 }
 
 func (pc *CacheContext) checkProxy(proxy Proxy) {
+	pc.grs.IncCheckProxy()
+	defer pc.grs.DecCheckProxy()
+
 	atomic.AddInt64(pc.checkPoolSize, 1)
 	defer func() {
 		atomic.AddInt64(pc.checkPoolSize, -1)

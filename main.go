@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	chttp "github.com/olomix/dynproxy/http"
 	"github.com/olomix/dynproxy/log"
 	"github.com/olomix/dynproxy/proxy_cache"
+	"github.com/olomix/dynproxy/stats"
 	"io"
 	"net"
 	"net/http"
@@ -28,13 +30,20 @@ func init() {
 func main() {
 	flag.Parse()
 	log.SetupLogs()
+
+	var grs stats.GoRoutineStats
+
 	var addr *net.TCPAddr
 	var err error
-	var pCache proxy_cache.ProxyCache = proxy_cache.NewProxyCache(proxyFileName)
+	var pCache proxy_cache.ProxyCache = proxy_cache.NewProxyCache(
+		proxyFileName, &grs)
 	addr, err = net.ResolveTCPAddr("tcp", listenAddress)
 	if err != nil {
 		panic(fmt.Sprintf("can't resolve addr %v: %v", listenAddress, err))
 	}
+
+	chttp.ListenAndServe(&grs)
+
 	var server *net.TCPListener
 	server, err = net.ListenTCP("tcp", addr)
 	if err != nil {
@@ -48,12 +57,20 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		go handleConnection(conn, pCache)
+		go handleConnection(conn, pCache, &grs)
 	}
 
 }
 
-func handleConnection(clientConn *net.TCPConn, pCache proxy_cache.ProxyCache) {
+func handleConnection(
+	clientConn *net.TCPConn,
+	pCache proxy_cache.ProxyCache,
+	grs *stats.GoRoutineStats,
+) {
+
+	grs.IncClientProxy()
+	defer grs.DecClientProxy()
+
 	var bufReader *bufio.Reader = bufio.NewReader(clientConn)
 	var req *http.Request
 	var err error
@@ -99,7 +116,7 @@ func handleConnection(clientConn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 		return
 	}
 
-	go copyProxyToClient(clientConn, proxyConn, req, proxy)
+	go copyProxyToClient(clientConn, proxyConn, req, proxy, grs)
 
 	var l int64
 	l, err = io.Copy(proxyConn, clientConn)
@@ -111,8 +128,13 @@ func handleConnection(clientConn *net.TCPConn, pCache proxy_cache.ProxyCache) {
 }
 
 func copyProxyToClient(
-	clientConn, proxyConn *net.TCPConn, req *http.Request, proxy string,
+	clientConn, proxyConn *net.TCPConn,
+	req *http.Request, proxy string,
+	grs *stats.GoRoutineStats,
 ) {
+	grs.IncProxyClient()
+	defer grs.DecProxyClient()
+
 	var err error
 	var bufReader *bufio.Reader = bufio.NewReader(proxyConn)
 	var resp *http.Response
