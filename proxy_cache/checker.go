@@ -194,6 +194,7 @@ func checkWithProxy(addr string) (result bool) {
 				return url.Parse(fmt.Sprintf("http://%s", addr))
 			},
 		},
+		Timeout: time.Duration(60 * time.Second),
 	}
 	var req *http.Request
 	var resp *http.Response
@@ -209,7 +210,7 @@ func checkWithProxy(addr string) (result bool) {
 	req.Header.Add("Proxy-Connection", "Keep-Alive")
 	resp, err = client.Do(req)
 	if err != nil {
-		log.Debugf("Can't connect to %v: %v", addr, err)
+		log.Debugf("Proxy request failed %v: %v", addr, err)
 		return false
 	}
 
