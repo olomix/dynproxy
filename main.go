@@ -31,18 +31,18 @@ func main() {
 	flag.Parse()
 	log.SetupLogs()
 
-	var grs stats.GoRoutineStats
+	var grs *stats.GoRoutineStats = stats.New()
 
 	var addr *net.TCPAddr
 	var err error
 	var pCache proxy_cache.ProxyCache = proxy_cache.NewProxyCache(
-		proxyFileName, &grs)
+		proxyFileName, grs)
 	addr, err = net.ResolveTCPAddr("tcp", listenAddress)
 	if err != nil {
 		panic(fmt.Sprintf("can't resolve addr %v: %v", listenAddress, err))
 	}
 
-	chttp.ListenAndServe(&grs)
+	chttp.ListenAndServe(grs)
 
 	var server *net.TCPListener
 	server, err = net.ListenTCP("tcp", addr)
@@ -55,9 +55,10 @@ func main() {
 		var conn *net.TCPConn
 		conn, err = server.AcceptTCP()
 		if err != nil {
+			log.Error(err)
 			panic(err)
 		}
-		go handleConnection(conn, pCache, &grs)
+		go handleConnection(conn, pCache, grs)
 	}
 
 }
@@ -70,20 +71,23 @@ func handleConnection(
 
 	grs.IncClientProxy()
 	defer grs.DecClientProxy()
+	requestIdx := grs.NewRequest(clientConn.LocalAddr().String())
+	defer grs.StopClientHandler(requestIdx)
 
-	var bufReader *bufio.Reader = bufio.NewReader(clientConn)
-	var req *http.Request
-	var err error
+	var (
+		bufReader *bufio.Reader = bufio.NewReader(clientConn)
+		req       *http.Request
+		err       error
+	)
 	if req, err = http.ReadRequest(bufReader); err != nil {
 		log.Errorf("Error on reading request: %v", err)
 		return
 	}
 	log.Debugf("Got request to %v", req.URL)
+	grs.SetUrl(requestIdx, req.URL.String())
 
 	var proxy string
-	var proxies []string
-	var ok bool
-	if proxies, ok = req.Header[PROXY_HEADER]; ok && len(proxies) > 0 {
+	if proxies, ok := req.Header[PROXY_HEADER]; ok && len(proxies) > 0 {
 		proxy = proxies[0]
 		req.Header.Del(PROXY_HEADER)
 	} else {
@@ -94,6 +98,7 @@ func handleConnection(
 			return
 		}
 	}
+	grs.SetProxy(requestIdx, proxy)
 	var proxyAddr *net.TCPAddr
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
@@ -116,7 +121,8 @@ func handleConnection(
 		return
 	}
 
-	go copyProxyToClient(clientConn, proxyConn, req, proxy, grs)
+	grs.StartProxyHandler(requestIdx)
+	go copyProxyToClient(clientConn, proxyConn, req, proxy, grs, requestIdx)
 
 	var l int64
 	l, err = io.Copy(proxyConn, clientConn)
@@ -131,13 +137,17 @@ func copyProxyToClient(
 	clientConn, proxyConn *net.TCPConn,
 	req *http.Request, proxy string,
 	grs *stats.GoRoutineStats,
+	requestIdx stats.RequestIdx,
 ) {
 	grs.IncProxyClient()
 	defer grs.DecProxyClient()
+	defer grs.StopProxyHandler(requestIdx)
 
-	var err error
-	var bufReader *bufio.Reader = bufio.NewReader(proxyConn)
-	var resp *http.Response
+	var (
+		err       error
+		bufReader *bufio.Reader = bufio.NewReader(proxyConn)
+		resp      *http.Response
+	)
 	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
 		log.Errorf("Can't read response from proxy: %v", err)
