@@ -3,7 +3,7 @@ package stats
 import (
 	"sync"
 	"sync/atomic"
-"github.com/olomix/dynproxy/log"
+	"github.com/olomix/dynproxy/log"
 )
 
 type RequestIdx struct {
@@ -88,6 +88,7 @@ func (grs *GoRoutineStats) allocateRequest() int {
 	newRequestsMask := make([]bool, newSize)
 	copy(newRequestsMask, grs.requestsMask)
 	grs.requestsMask = newRequestsMask
+	grs.requestsMask[idx] = true
 	return idx
 }
 
@@ -99,6 +100,7 @@ func (grs *GoRoutineStats) freeRequest(idx int) {
 
 func (grs *GoRoutineStats) NewRequest(client string) RequestIdx {
 	idx := grs.allocateRequest()
+	log.Debugf("New request %v", idx)
 	grs.lock.Lock()
 	grs.requests[idx].Client = client
 	grs.requests[idx].ClientHandlerRunning = true
@@ -145,7 +147,27 @@ func (grs *GoRoutineStats) StopClientHandler(idx RequestIdx) {
 	grs.lock.Unlock()
 }
 
+func (grs *GoRoutineStats) ActiveRequests() []Request {
+	grs.lock.Lock()
+	l := 0
+	for _, i := range grs.requestsMask {
+		if i {
+			l += 1
+		}
+	}
+	var reqs []Request = make([]Request, 0, l)
+	for idx, i := range grs.requestsMask {
+		if !i {
+			continue
+		}
+		reqs = append(reqs, grs.requests[idx])
+	}
+	grs.lock.Unlock()
+	return reqs
+}
+
 func waitForClose(grs *GoRoutineStats, ri RequestIdx) {
 	ri.wg.Wait()
 	grs.freeRequest(ri.idx)
+	log.Debugf("Free request %v", ri.idx)
 }
