@@ -150,7 +150,14 @@ func (grs *GoRoutineStats) StopClientHandler(idx RequestIdx) {
 	grs.lock.Unlock()
 }
 
-func (grs *GoRoutineStats) ActiveRequests() []Request {
+type ActiveRequest struct {
+	Idx                                       int
+	URL, Client, Proxy                        string
+	ClientHandlerRunning, ProxyHandlerRunning bool
+	ActiveSeconds                             int
+}
+
+func (grs *GoRoutineStats) ActiveRequests() []ActiveRequest {
 	grs.lock.Lock()
 	l := 0
 	for _, i := range grs.requestsMask {
@@ -158,12 +165,20 @@ func (grs *GoRoutineStats) ActiveRequests() []Request {
 			l += 1
 		}
 	}
-	var reqs []Request = make([]Request, 0, l)
+	var reqs []ActiveRequest = make([]ActiveRequest, 0, l)
 	for idx, i := range grs.requestsMask {
 		if !i {
 			continue
 		}
-		reqs = append(reqs, grs.requests[idx])
+		reqs = append(reqs, ActiveRequest{
+			Idx:                  idx,
+			URL:                  grs.requests[idx].URL,
+			Client:               grs.requests[idx].Client,
+			Proxy:                grs.requests[idx].Proxy,
+			ClientHandlerRunning: grs.requests[idx].ClientHandlerRunning,
+			ProxyHandlerRunning:  grs.requests[idx].ProxyHandlerRunning,
+			ActiveSeconds:        int(time.Since(grs.requests[idx].Start).Seconds()),
+		})
 	}
 	grs.lock.Unlock()
 	return reqs

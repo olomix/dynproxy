@@ -5,7 +5,6 @@ import (
 	"github.com/olomix/dynproxy/stats"
 	"html/template"
 	"net/http"
-	"time"
 )
 
 var controlAddress string
@@ -27,13 +26,8 @@ type HttpController struct {
 func ListenAndServe(grs *stats.GoRoutineStats) {
 	var controller *HttpController = new(HttpController)
 	controller.grs = grs
-	funcMap := template.FuncMap{
-		"since": func(start time.Time) int {
-			return int(time.Since(start).Seconds())
-		},
-	}
 	var err error
-	controller.tmpl, err = template.New("StatisticsTmpl").Funcs(funcMap).Parse(tmpl)
+	controller.tmpl, err = template.New("StatisticsTmpl").Parse(tmpl)
 	if err != nil {
 		panic(err)
 	}
@@ -45,7 +39,7 @@ func (c *HttpController) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClientProxyNum uint64
 		ProxyClientNum uint64
 		CheckProxyNum  uint64
-		Requests       []stats.Request
+		Requests       []stats.ActiveRequest
 	}{
 		c.grs.GetClientProxy(),
 		c.grs.GetProxyClient(),
@@ -65,6 +59,7 @@ checkProxyNum: {{.CheckProxyNum}} <br />
 <h3>Active requests:</h3>
 <table>
 <tr>
+  <th>Idx</th>
   <th>URL</th>
   <th>Cleint Addr</th>
   <th>Proxy Addr</th>
@@ -74,12 +69,13 @@ checkProxyNum: {{.CheckProxyNum}} <br />
 </tr>
 {{range .Requests}}
 <tr>
+  <td>{{.Idx}}</td>
   <td>{{.URL}}</td>
   <td>{{.Client}}</td>
   <td>{{.Proxy}}</td>
   <td>{{.ClientHandlerRunning}}</td>
   <td>{{.ProxyHandlerRunning}}</td>
-  <td>{{since .Start}}</td>
+  <td>{{.ActiveSeconds}}</td>
 </tr>
 {{end}}
 </table>
