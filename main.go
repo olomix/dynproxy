@@ -71,7 +71,7 @@ func handleConnection(
 
 	grs.IncClientProxy()
 	defer grs.DecClientProxy()
-	requestIdx := grs.NewRequest(clientConn.LocalAddr().String())
+	requestIdx := grs.NewRequest(clientConn.RemoteAddr().String())
 	defer grs.StopClientHandler(requestIdx)
 
 	var (

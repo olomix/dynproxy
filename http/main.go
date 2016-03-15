@@ -3,8 +3,9 @@ package http
 import (
 	"flag"
 	"github.com/olomix/dynproxy/stats"
+	"html/template"
 	"net/http"
-	"text/template"
+	"time"
 )
 
 var controlAddress string
@@ -26,8 +27,13 @@ type HttpController struct {
 func ListenAndServe(grs *stats.GoRoutineStats) {
 	var controller *HttpController = new(HttpController)
 	controller.grs = grs
+	funcMap := template.FuncMap{
+		"since": func(start time.Time) int {
+			return int(time.Since(start).Seconds())
+		},
+	}
 	var err error
-	controller.tmpl, err = template.New("StatisticsTmpl").Parse(tmpl)
+	controller.tmpl, err = template.New("StatisticsTmpl").Funcs(funcMap).Parse(tmpl)
 	if err != nil {
 		panic(err)
 	}
@@ -49,12 +55,34 @@ func (c *HttpController) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 const tmpl = `
-clientProxyNum: {{.ClientProxyNum}}
-proxyClientNum: {{.ProxyClientNum}}
-checkProxyNum: {{.CheckProxyNum}}
+<html>
+<body>
+<h3>Stats</h3>
+clientProxyNum: {{.ClientProxyNum}} <br />
+proxyClientNum: {{.ProxyClientNum}} <br />
+checkProxyNum: {{.CheckProxyNum}} <br />
 
-Active requests:
+<h3>Active requests:</h3>
+<table>
+<tr>
+  <th>URL</th>
+  <th>Cleint Addr</th>
+  <th>Proxy Addr</th>
+  <th>Client handler running</th>
+  <th>Proxy handler running</th>
+  <th>Time</th>
+</tr>
 {{range .Requests}}
-{{- .}}
+<tr>
+  <td>{{.URL}}</td>
+  <td>{{.Client}}</td>
+  <td>{{.Proxy}}</td>
+  <td>{{.ClientHandlerRunning}}</td>
+  <td>{{.ProxyHandlerRunning}}</td>
+  <td>{{since .Start}}</td>
+</tr>
 {{end}}
+</table>
+</body>
+</html>
 `

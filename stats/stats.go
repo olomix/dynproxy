@@ -1,9 +1,10 @@
 package stats
 
 import (
+	"github.com/olomix/dynproxy/log"
 	"sync"
 	"sync/atomic"
-	"github.com/olomix/dynproxy/log"
+	"time"
 )
 
 type RequestIdx struct {
@@ -14,6 +15,7 @@ type RequestIdx struct {
 type Request struct {
 	URL, Client, Proxy                        string
 	ClientHandlerRunning, ProxyHandlerRunning bool
+	Start                                     time.Time
 }
 
 type GoRoutineStats struct {
@@ -105,6 +107,7 @@ func (grs *GoRoutineStats) NewRequest(client string) RequestIdx {
 	grs.requests[idx].Client = client
 	grs.requests[idx].ClientHandlerRunning = true
 	grs.requests[idx].ProxyHandlerRunning = false
+	grs.requests[idx].Start = time.Now()
 
 	var ri RequestIdx = RequestIdx{idx: idx, wg: new(sync.WaitGroup)}
 	ri.wg.Add(1)
