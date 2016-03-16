@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"fmt"
 	"github.com/olomix/dynproxy/log"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,10 @@ import (
 type RequestIdx struct {
 	idx int
 	wg  *sync.WaitGroup
+}
+
+func (i RequestIdx) String() string {
+	return fmt.Sprintf("Request ID %v", i.idx)
 }
 
 type Request struct {
@@ -31,11 +36,11 @@ func New() *GoRoutineStats {
 	return new(GoRoutineStats)
 }
 
-func (grs *GoRoutineStats) IncClientProxy() {
+func (grs *GoRoutineStats) incClientProxy() {
 	atomic.AddUint64(&(grs.clientProxyNum), 1)
 }
 
-func (grs *GoRoutineStats) DecClientProxy() {
+func (grs *GoRoutineStats) decClientProxy() {
 	atomic.AddUint64(&(grs.clientProxyNum), ^uint64(0))
 }
 
@@ -43,11 +48,11 @@ func (grs *GoRoutineStats) GetClientProxy() uint64 {
 	return atomic.LoadUint64(&(grs.clientProxyNum))
 }
 
-func (grs *GoRoutineStats) IncProxyClient() {
+func (grs *GoRoutineStats) incProxyClient() {
 	atomic.AddUint64(&(grs.proxyClientNum), 1)
 }
 
-func (grs *GoRoutineStats) DecProxyClient() {
+func (grs *GoRoutineStats) decProxyClient() {
 	atomic.AddUint64(&(grs.proxyClientNum), ^uint64(0))
 }
 
@@ -114,6 +119,9 @@ func (grs *GoRoutineStats) NewRequest(client string) RequestIdx {
 	go waitForClose(grs, ri)
 
 	grs.lock.Unlock()
+
+	grs.incClientProxy()
+
 	return ri
 }
 
@@ -134,6 +142,8 @@ func (grs *GoRoutineStats) StartProxyHandler(idx RequestIdx) {
 	grs.requests[idx.idx].ProxyHandlerRunning = true
 	idx.wg.Add(1)
 	grs.lock.Unlock()
+
+	grs.incProxyClient()
 }
 
 func (grs *GoRoutineStats) StopProxyHandler(idx RequestIdx) {
@@ -141,6 +151,8 @@ func (grs *GoRoutineStats) StopProxyHandler(idx RequestIdx) {
 	grs.requests[idx.idx].ProxyHandlerRunning = false
 	idx.wg.Done()
 	grs.lock.Unlock()
+
+	grs.decProxyClient()
 }
 
 func (grs *GoRoutineStats) StopClientHandler(idx RequestIdx) {
@@ -148,6 +160,8 @@ func (grs *GoRoutineStats) StopClientHandler(idx RequestIdx) {
 	grs.requests[idx.idx].ClientHandlerRunning = false
 	idx.wg.Done()
 	grs.lock.Unlock()
+
+	grs.decClientProxy()
 }
 
 type ActiveRequest struct {

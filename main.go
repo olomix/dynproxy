@@ -69,8 +69,6 @@ func handleConnection(
 	grs *stats.GoRoutineStats,
 ) {
 
-	grs.IncClientProxy()
-	defer grs.DecClientProxy()
 	requestIdx := grs.NewRequest(clientConn.RemoteAddr().String())
 	defer grs.StopClientHandler(requestIdx)
 
@@ -80,10 +78,10 @@ func handleConnection(
 		err       error
 	)
 	if req, err = http.ReadRequest(bufReader); err != nil {
-		log.Errorf("Error on reading request: %v", err)
+		log.Errorf("%v: Error on reading request: %v", requestIdx, err)
 		return
 	}
-	log.Debugf("Got request to %v", req.URL)
+	log.Debugf("%v: Got request to %v", requestIdx, req.URL)
 	grs.SetUrl(requestIdx, req.URL.String())
 
 	var proxy string
@@ -93,7 +91,7 @@ func handleConnection(
 	} else {
 		proxy, err = pCache.NextProxy()
 		if err != nil {
-			log.Errorf("Can't get next proxy: %v", err)
+			log.Errorf("%v: Can't get next proxy: %v", requestIdx, err)
 			clientConn.Close()
 			return
 		}
@@ -102,22 +100,22 @@ func handleConnection(
 	var proxyAddr *net.TCPAddr
 	proxyAddr, err = net.ResolveTCPAddr("tcp", proxy)
 	if err != nil {
-		log.Errorf("can't resolve addr %v: %v", proxy, err)
+		log.Errorf("%v: can't resolve addr %v: %v", requestIdx, proxy, err)
 		clientConn.Close()
 		return
 	}
 	var proxyConn *net.TCPConn
-	log.Printf("Handle connection with %v", proxy)
+	log.Printf("%v: Handle connection with %v", requestIdx, proxy)
 	proxyConn, err = net.DialTCP("tcp", nil, proxyAddr)
 	if err != nil {
-		log.Errorf("can't deal to proxy: %v", err)
+		log.Errorf("%v: can't deal to proxy: %v", requestIdx, err)
 		clientConn.Close()
 		return
 	}
 
 	err = req.Write(proxyConn)
 	if err != nil {
-		log.Errorf("Error on copying from client to proxy: %v", err)
+		log.Errorf("%v: Error on copying from client to proxy: %v", requestIdx, err)
 		return
 	}
 
@@ -127,10 +125,10 @@ func handleConnection(
 	var l int64
 	l, err = io.Copy(proxyConn, clientConn)
 	if err != nil {
-		log.Errorf("Error on extra copying from client to proxy: %v", err)
+		log.Errorf("%v: Error on extra copying from client to proxy: %v", requestIdx, err)
 		return
 	}
-	log.Printf("Copied %d bytes from client to proxy", l)
+	log.Printf("%v: Copied %d bytes from client to proxy", requestIdx, l)
 }
 
 func copyProxyToClient(
@@ -139,8 +137,6 @@ func copyProxyToClient(
 	grs *stats.GoRoutineStats,
 	requestIdx stats.RequestIdx,
 ) {
-	grs.IncProxyClient()
-	defer grs.DecProxyClient()
 	defer grs.StopProxyHandler(requestIdx)
 
 	var (
@@ -150,11 +146,12 @@ func copyProxyToClient(
 	)
 	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
-		log.Errorf("Can't read response from proxy: %v", err)
+		log.Errorf("%v: Can't read response from proxy: %v", requestIdx, err)
 		proxyConn.Close()
 		clientConn.Close()
 		return
 	}
 	resp.Header.Add(PROXY_HEADER, proxy)
 	resp.Write(clientConn)
+	log.Debugf("%v: Proxy to client handler done", requestIdx)
 }
